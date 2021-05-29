@@ -1,16 +1,20 @@
 var DB = require('sharedb').DB;
 var pg = require('pg');
+var Redis = require('ioredis');
 
 // Postgres-backed ShareDB database
 
 function PostgresDB(options) {
-  if (!(this instanceof PostgresDB)) return new PostgresDB(options);
-  DB.call(this, options);
+  if (!(this instanceof PostgresDB)) return new PostgresDB(options)
+  DB.call(this, options)
 
-  this.closed = false;
+  this.closed = false
+  this.redis = null
 
-  this.pg_config = options;
-  this.pool = new pg.Pool(options);
+  this.pg_config = options
+  this.pool = new pg.Pool(options)
+  const redisOpts = options?.redisOpts || {}
+  if (Object.keys(redisOpts).length) { this.redis = new Redis(redisOpts) }
 };
 module.exports = PostgresDB;
 
@@ -37,10 +41,10 @@ PostgresDB.prototype.commit = function(collection, id, op, snapshot, options, ca
    * }
    * snapshot: PostgresSnapshot
    */
-    this.pool.connect((err, client, done) => {
-      if (err) {
+    this.pool.connect((error, client, done) => {
+      if (error) {
         done(client);
-        callback(err);
+        callback(error);
         return;
       }
     /*
@@ -59,7 +63,8 @@ PostgresDB.prototype.commit = function(collection, id, op, snapshot, options, ca
     *
     * Casting is required as postgres thinks that collection and doc_id are
     * not varchar  
-    */  
+    */
+    const snapshotsKey = `${collection}:${id}:snapshots`
     const query = {
       name: 'sdb-commit-op-and-snap',
       text: `WITH snapshot_id AS (
@@ -93,7 +98,7 @@ WHERE (
   )
 ) AND EXISTS (SELECT 1 FROM snapshot_id)
 RETURNING version`,
-      values: [collection,id,snapshot.v, snapshot.type, snapshot.data,op]
+      values: [ collection, id, snapshot.v, snapshot.type, snapshot.data, op ]
     }
     client.query(query, (err, res) => {
       if (err) {
@@ -103,51 +108,75 @@ RETURNING version`,
         callback(null,false)
       } 
       else {
+        RedisSetKey(snapshotsKey,
+        {
+          id,
+          v: snapshot.v,
+          type: snapshot.type,
+          data: snapshot.data
+        },
+        this.redis)
         done(client);
         callback(null,true)
       }
     })
-    
+
     })
 };
 
 // Get the named document from the database. The callback is called with (err,
 // snapshot). A snapshot with a version of zero is returned if the docuemnt
 // has never been created in the database.
-PostgresDB.prototype.getSnapshot = function(collection, id, fields, options, callback) {
-  this.pool.connect(function(err, client, done) {
-    if (err) {
+PostgresDB.prototype.getSnapshot = async function (collection, id, fields, options, callback) {
+  const snapshotsKey = `${collection}:${id}:snapshots`
+  if (this.redis) {
+    const isExists = await this.redis.exists(snapshotsKey)
+    if (isExists) {
+      try {
+        const snapshot = await this.redis.get(snapshotsKey)
+        callback(null, JSON.parse(snapshot))
+        return
+      } catch (error) {
+        console.log(error)
+      }
+    }
+  }
+
+  this.pool.connect((error, client, done) => {
+    if (error) {
       done(client);
-      callback(err);
+      callback(error);
       return;
     }
     client.query(
       'SELECT version, data, doc_type FROM snapshots WHERE collection = $1 AND doc_id = $2 LIMIT 1',
       [collection, id],
-      function(err, res) {
+      (err, res) => {
         done();
         if (err) {
           callback(err);
           return;
         }
         if (res.rows.length) {
-          var row = res.rows[0]
-          var snapshot = new PostgresSnapshot(
+          let row = res.rows[0]
+          let snapshot = new PostgresSnapshot(
             id,
             row.version,
             row.doc_type,
             row.data,
             undefined // TODO: metadata
           )
+          RedisSetKey(snapshotsKey, snapshot, this.redis)
           callback(null, snapshot);
         } else {
-          var snapshot = new PostgresSnapshot(
+          let snapshot = new PostgresSnapshot(
             id,
             0,
             null,
             undefined,
             undefined
           )
+          RedisSetKey(snapshotsKey, snapshot, this.redis)
           callback(null, snapshot);
         }
       }
@@ -164,28 +193,29 @@ PostgresDB.prototype.getSnapshot = function(collection, id, fields, options, cal
 // The version will be inferred from the parameters if it is missing.
 //
 // Callback should be called as callback(error, [list of ops]);
-PostgresDB.prototype.getOps = function(collection, id, from, to, options, callback) {
-  this.pool.connect(function(err, client, done) {
-    if (err) {
+PostgresDB.prototype.getOps = async function (collection, id, from, to, options, callback) {
+  this.pool.connect((error, client, done) => {
+    if (error) {
       done(client);
-      callback(err);
+      callback(error);
       return;
     }
 
-    var cmd = 'SELECT version, operation FROM ops WHERE collection = $1 AND doc_id = $2 AND version > $3 ';
-    var params = [collection, id, from];
+    let cmd = 'SELECT version, operation FROM ops WHERE collection = $1 AND doc_id = $2 AND version > $3 ';
+    let params = [collection, id, from];
     if(to || to == 0) { cmd += ' AND version <= $4'; params.push(to)}
     cmd += ' order by version';
     client.query( cmd, params,
-      function(err, res) {
+      (err, res) => {
         done();
         if (err) {
           callback(err);
           return;
         }
-        callback(null, res.rows.map(function(row) {
+        const arr = res.rows.map(function(row) {
           return row.operation;
-        }));
+        })
+        callback(null, arr)
       }
     )
   })
@@ -197,4 +227,12 @@ function PostgresSnapshot(id, version, type, data, meta) {
   this.type = type;
   this.data = data;
   this.m = meta;
+}
+
+function RedisSetKey (key, data, redis) {
+  if (!redis) {
+    return
+  }
+
+  redis.set(key, JSON.stringify(data))
 }
