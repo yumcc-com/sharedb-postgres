@@ -1,3 +1,9 @@
+# @yumcc/sharedb-postgres
+
+感谢原先的 `sharedb-postgres` 和 `@plotdb/sharedb-postgre`，由于读操作是直接从数据库获取，业务庞大时对数据库并不友好，所以我这里基于redis加多一层缓存，具体可查看文档，维护在`@yumcc/sharedb-postgre`.
+
+Thanks to the original `sharedb-postgres` and `@plotdb/sharedb-postgre`, since the read operation is obtained directly from the database, it is not friendly to the database when the business is large, so I add an extra layer of cache based on redis here, which can be viewed for details Documentation, maintained in `@yumcc/sharedb-postgre`.
+
 # @plotdb/sharedb-postgres
 
 PostgreSQL database adapter for [sharedb](https://github.com/share/sharedb). This driver can be used both as a snapshot store and oplog.
