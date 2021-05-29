@@ -1,7 +1,7 @@
 {
-  "name": "@plotdb/sharedb-postgres",
-  "version": "4.0.1",
-  "description": "PostgreSQL adapter for ShareDB. forked from share/sharedb-postgres",
+  "name": "@yumcc/sharedb-postgres",
+  "version": "5.0.0",
+  "description": "PostgreSQL adapter for ShareDB. forked from share/sharedb-postgres.Use redis for data caching.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -17,7 +17,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/plotdb/sharedb-postgres"
+    "url": "https://github.com/yumcc-com/sharedb-postgres"
   },
   "dependencies": {
     "pg": "^8.5.1",
